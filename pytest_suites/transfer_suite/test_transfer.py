@@ -14,8 +14,8 @@ from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-from browser_setup import (fail_with_screenshot, override_cases, save_screenshot,
-                           wait_any_message)
+from browser_setup import (fail_with_screenshot, fill_captcha, override_cases,
+                           save_screenshot, wait_any_message)
 from testcase_spec import TRANSFER_USER, cases_of
 
 CASES = override_cases(cases_of('transfer'))
@@ -54,6 +54,7 @@ def _login(driver, base_url):
         EC.presence_of_element_located((By.NAME, 'username')))
     driver.find_element(By.NAME, 'username').send_keys(TRANSFER_ACCOUNT)
     driver.find_element(By.NAME, 'password').send_keys(TRANSFER_PASSWORD)
+    fill_captcha(driver, base_url)          # 登录页已启用图形验证码
     driver.find_element(By.ID, 'btn-login').click()
     WebDriverWait(driver, WAIT).until(lambda d: '/accounts' in d.current_url)
 

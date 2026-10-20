@@ -20,7 +20,7 @@ REPORTS_DIR = os.path.join(BASE_DIR, 'reports')
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
 # 套件与用例表由 testcase_spec.py 生成；用例表有变更时把版本号 +1，启动即自动重建
-SEED_VERSION = 6
+SEED_VERSION = 7
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 # 会话密钥：优先读环境变量；未设置时用本地演示缺省值

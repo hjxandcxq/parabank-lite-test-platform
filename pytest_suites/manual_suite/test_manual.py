@@ -25,7 +25,7 @@ from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-from browser_setup import save_screenshot
+from browser_setup import fill_captcha, save_screenshot
 
 WAIT = int(os.environ.get('PB_WAIT', '8'))
 RESULT_FILE = os.environ.get('PB_RESULT_FILE', '').strip()
@@ -113,18 +113,24 @@ def _is_success(el):
     return 'msg success' in (el.get_attribute('class') or '')
 
 
+def _ui_login(driver, base_url, username, password):
+    """打开登录页并提交；验证码由测试专用接口读取后填入。"""
+    driver.get(f'{base_url}/login')
+    WebDriverWait(driver, WAIT).until(
+        EC.presence_of_element_located((By.NAME, 'username')))
+    driver.find_element(By.NAME, 'username').send_keys(username)
+    driver.find_element(By.NAME, 'password').send_keys(password)
+    fill_captcha(driver, base_url)
+    driver.find_element(By.ID, 'btn-login').click()
+
+
 # ---------- 三个场景 ----------
 def test_manual_login(driver, base_url):
     """用填写的用户名/密码登录一次"""
     username = _env('username')
     password = _env('password')
 
-    driver.get(f'{base_url}/login')
-    WebDriverWait(driver, WAIT).until(
-        EC.presence_of_element_located((By.NAME, 'username')))
-    driver.find_element(By.NAME, 'username').send_keys(username)
-    driver.find_element(By.NAME, 'password').send_keys(password)
-    driver.find_element(By.ID, 'btn-login').click()
+    _ui_login(driver, base_url, username, password)
 
     no_feedback = _wait_login(driver, 'manual_login')
     if no_feedback:
@@ -177,12 +183,7 @@ def test_manual_transfer(driver, base_url):
     to_acc = _env('to_account', '10002')
     amount = _env('amount', '100')
 
-    driver.get(f'{base_url}/login')
-    WebDriverWait(driver, WAIT).until(
-        EC.presence_of_element_located((By.NAME, 'username')))
-    driver.find_element(By.NAME, 'username').send_keys(username)
-    driver.find_element(By.NAME, 'password').send_keys(password)
-    driver.find_element(By.ID, 'btn-login').click()
+    _ui_login(driver, base_url, username, password)
     no_feedback = _wait_login(driver, 'manual_transfer_login')
     if no_feedback:
         _finish('转账', False, f'转账前置登录未成功：{no_feedback}',

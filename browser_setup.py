@@ -143,6 +143,42 @@ def wait_any_message(driver, wait, case):
         raise
 
 
+def get_captcha_text(driver, base_url):
+    """读取当前浏览器会话的验证码文本（登录自动化用）。
+
+    验证码以 SVG 图片呈现，Selenium 无法直接"看"图；被测系统为此提供了
+    测试专用只读接口 GET /parabank/captcha/text（环境变量
+    PB_CAPTCHA_TEST_HOOK=0 可关闭）。这里复用浏览器的会话 Cookie 调用该接口，
+    确保拿到的就是页面上那张图对应的验证码。
+    """
+    import requests
+
+    cookies = {c['name']: c['value'] for c in driver.get_cookies()}
+    resp = requests.get(f'{base_url}/captcha/text', cookies=cookies, timeout=5)
+    resp.raise_for_status()
+    data = resp.json()
+    text = (data.get('text') or '').strip()
+    if not text:
+        raise RuntimeError(f'未取到验证码（检查 PB_CAPTCHA_TEST_HOOK 是否被关闭）：{data}')
+    return text
+
+
+def fill_captcha(driver, base_url, field='captcha', transform=None):
+    """把当前会话的验证码填进表单，返回填入的文本。
+
+    transform 可传入 str.lower 等函数，用于验证"验证码不区分大小写"。
+    """
+    from selenium.webdriver.common.by import By
+
+    text = get_captcha_text(driver, base_url)
+    if transform:
+        text = transform(text)
+    el = driver.find_element(By.NAME, field)
+    el.clear()
+    el.send_keys(text)
+    return text
+
+
 def override_cases(cases):
     """给用例表数据套上平台参数覆盖（PB_<字段名> 环境变量）。
 

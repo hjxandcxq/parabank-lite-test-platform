@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """ParaBank Lite — 被测银行系统 (Flask Blueprint)"""
 import os
+import random
 import re
+import secrets
 import sqlite3
-from flask import (Blueprint, render_template, request,
+import time
+from flask import (Blueprint, Response, jsonify, render_template, request,
                    redirect, url_for, session)
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -17,6 +20,21 @@ DB_PATH = os.path.join(BASE_DIR, 'parabank_test.db')
 USERNAME_RE = re.compile(r'^[A-Za-z0-9_]+$')
 PASSWORD_RE = re.compile(r'^[A-Za-z0-9@#$_\.]+$')
 AMOUNT_RE = re.compile(r'^-?[\d.]*$')
+
+# ============================================================
+# 登录图形验证码（扩展功能）
+# 验证码以 SVG 图片呈现，4 位字母数字（去掉易混淆的 0/O/1/I），
+# 不区分大小写，有效期 PB_CAPTCHA_TTL 秒（默认 120），提交一次即作废。
+#
+# 自动化测试取码：GET /parabank/captcha/text 返回当前会话的验证码文本，
+# 仅在 PB_CAPTCHA_TEST_HOOK=1（默认开启）时可用。该接口是测试专用后门，
+# 面向手工演示/生产演示时可设 PB_CAPTCHA_TEST_HOOK=0 关闭——关闭后自动化
+# 登录用例会因拿不到验证码而失败。
+# ============================================================
+CAPTCHA_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+CAPTCHA_LENGTH = 4
+CAPTCHA_TTL = int(os.environ.get('PB_CAPTCHA_TTL', '120'))
+CAPTCHA_TEST_HOOK = os.environ.get('PB_CAPTCHA_TEST_HOOK', '1') == '1'
 
 # ============================================================
 # 注入缺陷（演示用）：BUG-01 ~ BUG-03。
@@ -44,6 +62,68 @@ def validate_login(username, password):
     if not PASSWORD_RE.match(password):
         return False, '密码只允许字母、数字和字符@#$._'
     return True, None
+
+
+def validate_captcha(captcha_input, expected, issued_at=None, now=None):
+    """校验图形验证码（纯函数，便于一致性校验回放）。
+
+    校验顺序：非空 → 会话中是否存在/是否过期 → 是否一致（忽略大小写）。
+    issued_at / now 同时传入时才做有效期检查。
+    """
+    value = (captcha_input or '').strip()
+    if not value:
+        return False, '验证码必填'
+    if not expected:
+        return False, '验证码已失效，请刷新'
+    if issued_at is not None and now is not None and now - issued_at > CAPTCHA_TTL:
+        return False, '验证码已失效，请刷新'
+    if value.upper() != expected.upper():
+        return False, '验证码错误'
+    return True, None
+
+
+def new_captcha():
+    """生成新验证码并写入会话（同时刷新签发时间）。"""
+    text = ''.join(secrets.choice(CAPTCHA_ALPHABET) for _ in range(CAPTCHA_LENGTH))
+    session['pb_captcha'] = text
+    session['pb_captcha_ts'] = time.time()
+    return text
+
+
+def captcha_expired():
+    ts = session.get('pb_captcha_ts')
+    return ts is None or (time.time() - ts) > CAPTCHA_TTL
+
+
+def _captcha_svg(text):
+    """把验证码画成带干扰线/噪点的 SVG（不依赖 Pillow 等第三方图形库）。"""
+    width, height = 120, 40
+    rnd = random.Random()
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
+        f'height="{height}" viewBox="0 0 {width} {height}">',
+        f'<rect width="{width}" height="{height}" fill="#f5f8ff"/>',
+    ]
+    for _ in range(6):
+        parts.append(
+            f'<line x1="{rnd.randint(0, width)}" y1="{rnd.randint(0, height)}" '
+            f'x2="{rnd.randint(0, width)}" y2="{rnd.randint(0, height)}" '
+            f'stroke="#c3d3ee" stroke-width="1"/>')
+    for _ in range(24):
+        parts.append(
+            f'<circle cx="{rnd.randint(0, width)}" cy="{rnd.randint(0, height)}" '
+            f'r="{rnd.randint(1, 2)}" fill="#d5e1f5"/>')
+    for i, ch in enumerate(text):
+        x = 14 + i * 26
+        y = 29 + rnd.randint(-3, 3)
+        angle = rnd.randint(-18, 18)
+        color = rnd.choice(['#1a3d7c', '#2f5fa8', '#0f6b5c', '#7a3b8f'])
+        parts.append(
+            f'<text x="{x}" y="{y}" font-family="Arial,Helvetica,sans-serif" '
+            f'font-size="24" font-weight="bold" fill="{color}" '
+            f'transform="rotate({angle} {x} {y})">{ch}</text>')
+    parts.append('</svg>')
+    return ''.join(parts)
 
 
 def validate_register(username, password, confirm):
@@ -282,21 +362,63 @@ def login():
         if not ok:
             error = msg
         else:
-            conn = get_db()
-            user = conn.execute("SELECT * FROM pb_users WHERE username=?",
-                                (username,)).fetchone()
-            conn.close()
-            # BUG-01：未区分"账号不存在"与"密码错误"（违反规则 2.1(5)(6)，
-            #         预期 LOGIN_002、LOGIN_003 失败）
-            if not user:
-                error = '用户名或密码错误' if INJECT_DEFECTS else '账号不存在'
-            elif not check_password_hash(user['password_hash'], password):
-                error = '用户名或密码错误' if INJECT_DEFECTS else '密码错误'
+            # 验证码在用户名/密码格式校验之后、账号密码比对之前校验：
+            # 字段格式错误仍优先提示（与 LOGIN_004~015 的预期文案一致）
+            ok, msg = validate_captcha(
+                request.form.get('captcha'),
+                session.get('pb_captcha'),
+                session.get('pb_captcha_ts'),
+                time.time())
+            if not ok:
+                error = msg
             else:
-                session['pb_user'] = username
-                session['pb_user_id'] = user['id']
-                return redirect(url_for('parabank.accounts'))
+                conn = get_db()
+                user = conn.execute("SELECT * FROM pb_users WHERE username=?",
+                                    (username,)).fetchone()
+                conn.close()
+                # BUG-01：未区分"账号不存在"与"密码错误"（违反规则 2.1(5)(6)，
+                #         预期 LOGIN_002、LOGIN_003 失败）
+                if not user:
+                    error = '用户名或密码错误' if INJECT_DEFECTS else '账号不存在'
+                elif not check_password_hash(user['password_hash'], password):
+                    error = '用户名或密码错误' if INJECT_DEFECTS else '密码错误'
+                else:
+                    session.pop('pb_captcha', None)
+                    session.pop('pb_captcha_ts', None)
+                    session['pb_user'] = username
+                    session['pb_user_id'] = user['id']
+                    return redirect(url_for('parabank.accounts'))
+
+        # 任何一次提交后都换发新验证码：旧验证码不能重复使用
+        new_captcha()
+    else:
+        # 打开/刷新登录页时换一张；有效期内的验证码继续沿用（刷新图片不会换码）
+        if not session.get('pb_captcha') or captcha_expired():
+            new_captcha()
     return render_template('parabank/login.html', error=error)
+
+
+@pb_bp.route('/captcha/image')
+def captcha_image():
+    """验证码图片。?new=1 换一张（生成新码），否则沿用会话中的验证码。"""
+    text = session.get('pb_captcha')
+    if request.args.get('new') or not text or captcha_expired():
+        text = new_captcha()
+    resp = Response(_captcha_svg(text), mimetype='image/svg+xml')
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return resp
+
+
+@pb_bp.route('/captcha/text')
+def captcha_text():
+    """测试专用只读接口：返回当前会话的验证码文本（PB_CAPTCHA_TEST_HOOK=0 关闭）。"""
+    if not CAPTCHA_TEST_HOOK:
+        return jsonify({'error': 'captcha test hook disabled'}), 403
+    text = session.get('pb_captcha')
+    if not text:
+        return jsonify({'error': 'no captcha in session'}), 404
+    left = max(0, int(CAPTCHA_TTL - (time.time() - session.get('pb_captcha_ts', 0))))
+    return jsonify({'text': text, 'expires_in': left})
 
 
 @pb_bp.route('/register', methods=['GET', 'POST'])

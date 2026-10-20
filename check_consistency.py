@@ -28,8 +28,8 @@ DATA_LAYER_CASES = {
 }
 
 # 本期用例表基线（用例表调整后在这里同步一次，用来兜住误改）
-EXPECT_CASES = {'login': 15, 'register': 22, 'transfer': 19}
-EXPECT_PRIORITY = {'P0': 18, 'P1': 37, 'P2': 1}
+EXPECT_CASES = {'login': 19, 'register': 22, 'transfer': 19}
+EXPECT_PRIORITY = {'P0': 19, 'P1': 40, 'P2': 1}
 
 RESULTS = []
 
@@ -46,7 +46,12 @@ def validate_case(case):
 
     f = case['form']
     if case['suite'] == 'login':
-        return pb.validate_login(f['username'], f['password'])
+        ok, msg = pb.validate_login(f['username'], f['password'])
+        if ok:
+            # 登录页已加图形验证码：格式校验通过后按用例的 captcha_mode 回放
+            ok, msg = pb.validate_captcha(spec.captcha_input(case),
+                                          spec.CAPTCHA_SAMPLE)
+        return ok, msg
     if case['suite'] == 'register':
         return pb.validate_register(f['username'], f['password'], f['confirm'])
     ok, _amount, msg = pb.validate_transfer(f['amount'], f['from_account'],

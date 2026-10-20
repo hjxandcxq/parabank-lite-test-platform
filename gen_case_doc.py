@@ -41,6 +41,8 @@ def _outcome(case):
 def build():
     L = []
     add = L.append
+    counts = {m['key']: len(spec.cases_of(m['key'])) for m in spec.MODULES}
+    total_cases = len(spec.CASES)
 
     add('# ParaBank Lite 业务规则与测试用例设计')
     add('')
@@ -61,10 +63,11 @@ def build():
         add(f"| 预置账号 | {u['username']} / {u['password']}，账户 "
             + '、'.join(f"{a}（{b:.2f}）" for a, b in u['accounts']) + ' |')
     add('| 核心模块 | 登录、注册、转账（账户查询本期无规则与用例，未纳入套件） |')
-    add('| 用例总数 | 45 条（登录 10 + 注册 17 + 转账 18） |')
+    add(f"| 用例总数 | {total_cases} 条（登录 {counts['login']} + "
+        f"注册 {counts['register']} + 转账 {counts['transfer']}） |")
     add(f"| 系统状态 | 已注入 {len(spec.INJECTED_DEFECTS)} 处缺陷（演示用，见第七节），"
         f"预期 {len(spec.expected_failures())} 条用例失败；"
-        f"关闭 parabank_lite.INJECT_DEFECTS 即恢复 45 条全绿 |")
+        f"关闭 parabank_lite.INJECT_DEFECTS 即恢复 {total_cases} 条全绿 |")
     add('')
 
     # ---------- 二、业务规则 ----------
@@ -141,7 +144,7 @@ def build():
         fail_by_module[name] = fail_by_module.get(name, 0) + 1
     add(f"其中 {len(spec.expected_failures())} 条为预期失败（注入缺陷所致："
         + '、'.join(f'{k} {v} 条' for k, v in fail_by_module.items())
-        + "），用例表本身未做任何改动。")
+        + "）；登录验证码 4 条（LOGIN_016~019）为本次扩展，其余用例取自原文档用例表。")
     add('')
 
     # ---------- 六、提示文案对照 ----------
@@ -166,7 +169,7 @@ def build():
     # ---------- 七、注入缺陷清单 ----------
     add('## 七、注入缺陷清单（演示用）')
     add('')
-    add('用例表严格照原文档第四节，45 条的数据与预期结果未做任何改动；'
+    add(f'用例表照原文档第四节，共 {total_cases} 条（登录验证码 4 条为本次扩展）；'
         '下列缺陷全部注入在被测系统一侧，用于演示测试平台的失败归因能力。'
         '每个缺陷在 `parabank_lite.py` 中都有 `BUG-xx` 标记，'
         '总开关 `INJECT_DEFECTS = False` 即恢复为完全符合文档的系统。')

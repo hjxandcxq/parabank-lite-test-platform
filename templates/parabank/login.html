@@ -18,6 +18,14 @@ h1 { font-size:20px; margin-bottom:6px; color:#1a3d7c; }
                border-radius:6px; font-size:14px; font-family:inherit; }
 .field input:focus { outline:none; border-color:#409eff;
                      box-shadow:0 0 0 3px rgba(64,158,255,0.1); }
+.captcha-row { display:flex; gap:12px; align-items:center; }
+.captcha-row input { flex:1; }
+.captcha-row img { width:120px; height:40px; border:1.5px solid #dcdfe6;
+                   border-radius:6px; cursor:pointer; background:#f5f8ff;
+                   flex:none; }
+.refresh { display:inline-block; margin-top:6px; font-size:12px;
+           color:#409eff; text-decoration:none; cursor:pointer; }
+.refresh:hover { text-decoration:underline; }
 button { width:100%; padding:11px; background:#1a3d7c; color:#fff;
          border:none; border-radius:6px; font-size:14px; font-weight:600;
          cursor:pointer; font-family:inherit; }
@@ -43,8 +51,30 @@ button:hover { background:#153065; }
             <label>密码</label>
             <input type="password" name="password" id="password" placeholder="6-20 位">
         </div>
+        <div class="field">
+            <label>验证码</label>
+            <div class="captcha-row">
+                <input type="text" name="captcha" id="captcha" maxlength="4"
+                       autocomplete="off" inputmode="latin" placeholder="4 位验证码">
+                <img id="captcha-img" src="/parabank/captcha/image" alt="验证码"
+                     title="点击换一张">
+            </div>
+            <a class="refresh" id="captcha-refresh">看不清？换一张</a>
+        </div>
         <button type="submit" id="btn-login">登录</button>
     </form>
     <div class="links">还没有账号？<a href="/parabank/register">立即注册</a></div>
 </div>
+<script>
+    function refreshCaptcha() {
+        document.getElementById('captcha-img').src =
+            '/parabank/captcha/image?new=1&t=' + Date.now();
+        document.getElementById('captcha').value = '';
+    }
+    document.getElementById('captcha-img').addEventListener('click', refreshCaptcha);
+    document.getElementById('captcha-refresh').addEventListener('click', function (e) {
+        e.preventDefault();
+        refreshCaptcha();
+    });
+</script>
 </body></html>
